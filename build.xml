@@ -1,0 +1,605 @@
+<!--
+  ~ Copyright (c) 2011, The Broad Institute
+  ~
+  ~ Permission is hereby granted, free of charge, to any person
+  ~ obtaining a copy of this software and associated documentation
+  ~ files (the "Software"), to deal in the Software without
+  ~ restriction, including without limitation the rights to use,
+  ~ copy, modify, merge, publish, distribute, sublicense, and/or sell
+  ~ copies of the Software, and to permit persons to whom the
+  ~ Software is furnished to do so, subject to the following
+  ~ conditions:
+  ~
+  ~ The above copyright notice and this permission notice shall be
+  ~ included in all copies or substantial portions of the Software.
+  ~ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  ~ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+  ~ OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+  ~ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+  ~ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+  ~ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  ~ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+  ~ OTHER DEALINGS IN THE SOFTWARE.
+  -->
+
+<project name="Sting" default="dist" basedir="." xmlns:ivy="antlib:org.apache.ivy.ant">
+	<setproxy proxyhost="192.168.2.115" proxyport="3128" />
+	<description>Compile and distribute the Sting toolkit</description>
+	<property name="build.sysclasspath" value="first" />
+
+	<property name="build.dir" value="build" />
+	<property name="dist.dir" value="dist" />
+	<property name="lib.dir" value="lib" />
+	<property name="external.dir" value="external" />
+	<property name="public.dir" value="public" />
+	<property name="private.dir" value="private" />
+	<property name="java.public.source.dir" value="${public.dir}/java/src" />
+	<property name="java.private.source.dir" value="${private.dir}/java/src" />
+	<property name="java.classes" value="${build.dir}/java/classes" />
+	<property name="resource.file" value="StingText.properties" />
+	<property name="resource.path" value="${java.classes}/StingText.properties" />
+
+	<property name="scala.public.source.dir" value="${public.dir}/scala/src" />
+	<property name="scala.private.source.dir" value="${private.dir}/scala/src" />
+	<property name="scala.classes" value="${build.dir}/scala/classes" />
+
+	<property name="queue-extensions.source.dir" value="${build.dir}/queue-extensions/src" />
+
+	<property name="javadoc.dir" value="javadoc" />
+	<property name="scaladoc.dir" value="scaladoc" />
+
+	<!-- Contracts for Java -->
+	<!-- To disable, run with -Duse.contracts=false -->
+	<property name="use.contracts" value="true" />
+	<property name="java.contracts" value="${build.dir}/java/contracts" />
+	<property name="contracts.version" value="1.0-20110609" />
+	<property name="cofoja.jar" value="${lib.dir}/cofoja-${contracts.version}.jar" />
+
+	<!-- where to find 'findbugs', which you must set if you plan to use 'ant findbugs' -->
+	<property name="findbugs.home" value="./findbugs" />
+
+	<!-- do we want to halt on failure of a unit test? default to yes (Bamboo uses 'no') -->
+	<property name="halt" value="yes" />
+
+	<!-- should our unit test output go to a file or the screen?
+    false means it goes to the screen (default) true to file -->
+	<property name="usefile" value="false" />
+
+	<!-- If running the 'package' task, this property controls the name of the xml file to package -->
+	<property name="package.xml.dir" value="${public.dir}/packages" />
+	<property name="executable" value="GenomeAnalysisTK" />
+
+	<property environment="env" />
+
+	<patternset id="java.source.pattern">
+		<include name="${java.public.source.dir}/**/*.java" />
+	</patternset>
+
+	<fileset id="java.source.files" dir="${basedir}">
+		<patternset refid="java.source.pattern" />
+	</fileset>
+
+	<!-- terrible hack to get gatkdocs to see all files -->
+	<patternset id="all.java.source.pattern">
+		<include name="${java.public.source.dir}/**/*.java" />
+	</patternset>
+
+	<fileset id="all.java.source.files" dir="${basedir}">
+		<patternset refid="all.java.source.pattern" />
+	</fileset>
+
+	<fileset id="external.source.files" dir="${external.dir}" erroronmissingdir="false">
+		<include name="**/*.java" />
+	</fileset>
+
+	<fileset id="java.class.files" dir="${java.classes}" erroronmissingdir="false">
+		<include name="**/*.class" />
+	</fileset>
+
+	<!-- the path for resources that need to go into the GATK jar;
+         any additional resources should go into this set. -->
+	<path id="gatk.resources">
+		<fileset dir="${basedir}">
+			<include name="${java.public.source.dir}/**/templates/*" />
+		</fileset>
+	</path>
+
+	<patternset id="dependency.mask" includes="*.jar">
+		<exclude name="testng*.jar" />
+		<exclude name="bcel*.jar" />
+	</patternset>
+
+	<path id="external.dependencies">
+		<fileset dir="${lib.dir}">
+			<patternset refid="dependency.mask" />
+		</fileset>
+	</path>
+
+	<path id="build.results">
+		<fileset dir="dist">
+			<patternset refid="dependency.mask" />
+		</fileset>
+	</path>
+
+	<target name="init.resolve" unless="init.resolve.done">
+		<!-- ivy properties -->
+		<property name="ivy.install.version" value="2.2.0" />
+		<property name="ivy.home" value="${user.home}/.ant" />
+		<property name="ivy.jar.dir" value="${ivy.home}/${lib.dir}" />
+		<property name="ivy.jar.file" value="ivy-${ivy.install.version}.jar" />
+		<property name="ivy.settings.dir" value="settings" />
+		<property file="${ivy.settings.dir}/ivysettings.properties" />
+
+		<mkdir dir="${lib.dir}" />
+		<mkdir dir="${ivy.jar.dir}" />
+
+		<get src="http://repo1.maven.org/maven2/org/apache/ivy/ivy/${ivy.install.version}/${ivy.jar.file}" dest="${ivy.jar.dir}/${ivy.jar.file}" usetimestamp="false" />
+		<taskdef resource="org/apache/ivy/ant/antlib.xml" uri="antlib:org.apache.ivy.ant" classpath="${ivy.jar.dir}/${ivy.jar.file}" />
+		<ivy:settings file="${ivy.settings.dir}/ivysettings.xml" />
+		<property name="init.resolve.done" value="true" />
+	</target>
+
+	<target name="resolve" depends="init.resolve,init" description="locate and download library dependencies">
+		<property name="ivy.conf" value="default" />
+		<ivy:retrieve file="ivy.xml" conf="${ivy.conf}" />
+		<!-- Remove old versions of ivy jars AFTER the ivy:retrieve has been class loaded. -->
+		<delete file="${ivy.jar.dir}/ivy-2.0.0.jar" />
+		<delete file="${ivy.jar.dir}/ivy-2.2.0-rc1.jar" />
+	</target>
+
+	<target name="init.buildall">
+		<!-- Set the properties needed to build everything -->
+	</target>
+
+	<target name="init.buildpublic">
+		<!-- Set the properties needed to build public only -->
+		<property name="gatk.target" value="core" />
+	</target>
+
+	<target name="git.describe">
+		<exec executable="git" outputproperty="git.describe.output" resultproperty="git.describe.exit.value" failonerror="false">
+			<arg line="describe" />
+		</exec>
+		<condition property="git.describe.succeeded">
+			<equals arg1="${git.describe.exit.value}" arg2="0" />
+		</condition>
+	</target>
+
+	<target name="tagged.build.version" depends="git.describe" if="git.describe.succeeded">
+		<property name="build.version" value="${git.describe.output}" />
+	</target>
+
+	<target name="git.rev-parse" depends="git.describe" unless="git.describe.succeeded">
+		<exec executable="git" outputproperty="git.rev-parse.output" resultproperty="git.rev-parse.exit.value" failonerror="false">
+			<arg line="rev-parse HEAD" />
+		</exec>
+		<condition property="git.rev-parse.succeeded">
+			<equals arg1="${git.rev-parse.exit.value}" arg2="0" />
+		</condition>
+	</target>
+
+	<target name="untagged.build.version" depends="git.rev-parse" if="git.rev-parse.succeeded">
+		<property name="build.version" value="${git.rev-parse.output}" />
+	</target>
+
+	<target name="generate.build.version" depends="tagged.build.version, untagged.build.version">
+		<!-- Set build.version to exported if no other value has been set -->
+		<property name="build.version" value="exported" />
+	</target>
+
+	<!-- define some key locations that might change based on how the build is run -->
+	<target name="init" depends="generate.build.version">
+		<tstamp>
+			<format property="build.timestamp" pattern="yyyy/MM/dd HH:mm:ss" />
+		</tstamp>
+
+		<!-- Set target based on STING_BUILD_TYPE environment variable -->
+		<condition property="sting.target" value="core" else="${env.STING_BUILD_TYPE}">
+			<equals arg1="${env.STING_BUILD_TYPE}" arg2="$${env.STING_BUILD_TYPE}" />
+		</condition>
+
+		<!-- Get the gatk build target.  Default to the STING_BUILD_TYPE.  -->
+		<condition property="gatk.target" value="${sting.target}" else="${env.GATK_BUILD_TYPE}">
+			<equals arg1="${env.GATK_BUILD_TYPE}" arg2="$${env.GATK_BUILD_TYPE}" />
+		</condition>
+
+		<echo message="GATK build      : ${gatk.target}" />
+		<echo message="source revision : ${build.version}" />
+		<echo message="build time      : ${build.timestamp}" />
+
+		<condition property="include.contracts">
+			<equals arg1="${use.contracts}" arg2="true" />
+		</condition>
+
+		<!-- Create the build directory structure used by compile -->
+		<mkdir dir="${build.dir}" />
+		<mkdir dir="${lib.dir}" />
+		<mkdir dir="${java.classes}" />
+		<mkdir dir="${java.contracts}" />
+
+		<pathconvert property="external.build.dir">
+			<path path="${java.classes}" />
+		</pathconvert>
+
+		<pathconvert property="external.dist.dir">
+			<path path="${dist.dir}" />
+		</pathconvert>
+
+		<!-- GATK dependencies consist of 3rd party plugins plus compiled GATK classes -->
+		<pathconvert property="external.gatk.classpath">
+			<path path="${java.classes}" />
+			<path refid="external.dependencies" />
+		</pathconvert>
+	</target>
+
+	<target name="gatk.compile.public.source" depends="init,resolve">
+		<javac fork="true" srcdir="${java.public.source.dir}" memoryMaximumSize="512m" destdir="${java.classes}" debug="true" debuglevel="lines,vars,source" classpathref="external.dependencies" tempdir="${java.io.tmpdir}">
+			<compilerarg value="-proc:none" />
+		</javac>
+	</target>
+
+	<target name="gatk.compile.source" depends="gatk.compile.public.source" description="compile the GATK source" />
+
+	<target name="gatk.contracts.public" depends="gatk.compile.source" if="include.contracts">
+		<javac fork="true" memoryMaximumSize="512m" srcdir="${java.public.source.dir}" destdir="${java.contracts}" debug="true" debuglevel="lines,vars,source" tempdir="${java.io.tmpdir}">
+			<classpath>
+				<path refid="external.dependencies" />
+				<pathelement path="${java.classes}" />
+			</classpath>
+			<compilerarg value="-Acom.google.java.contract.debug" />
+			<compilerarg value="-Acom.google.java.contract.dump=dump/" />
+			<compilerarg value="-proc:only" />
+		</javac>
+	</target>
+
+	<target name="gatk.contracts" depends="gatk.contracts.public" description="create GATK contracts" if="include.contracts" />
+
+	<target name="gatk.compile" depends="init,resolve,gatk.compile.source,gatk.contracts" />
+
+	<target name="init.extracthelp" depends="gatk.compile">
+		<loadfile property="properties.version" srcfile="${basedir}/${resource.path}" failonerror="false" quiet="true">
+			<filterchain>
+				<linecontains>
+					<contains value="org.broadinstitute.sting.gatk.CommandLineGATK.version" />
+				</linecontains>
+				<tokenfilter>
+					<replaceregex pattern="^.*\.(.*?)$" replace="\1" />
+				</tokenfilter>
+				<striplinebreaks />
+			</filterchain>
+		</loadfile>
+
+		<!-- This fileset will contain only source files modified since the resource file was last generated,
+             or all source files if the resource file doesn't exist -->
+		<fileset dir="${basedir}" id="modified.source.files">
+			<patternset refid="java.source.pattern" />
+			<include name="${external.dir}/**/*.java" />
+			<depend targetdir="${basedir}">
+				<mapper type="merge" to="${resource.path}" />
+			</depend>
+		</fileset>
+
+		<!-- Set the sources.modified property only if our fileset of modified source files is non-empty -->
+		<pathconvert refid="modified.source.files" property="sources.modified" setonempty="false" />
+
+		<!-- Due to a limitation in the doclet API, we always need to pass package-info files to javadoc -->
+		<fileset dir="${basedir}" id="package.info.files">
+			<include name="${java.public.source.dir}/**/package-info.java" />
+			<include name="${external.dir}/**/package-info.java" />
+		</fileset>
+
+		<condition property="uptodate.extracthelp">
+			<or>
+				<isset property="disable.help" />
+				<and>
+					<not>
+						<isset property="sources.modified" />
+					</not>
+					<equals arg1="${properties.version}" arg2="${build.version}" />
+				</and>
+			</or>
+		</condition>
+	</target>
+
+	<target name="extracthelp" depends="init.extracthelp" unless="uptodate.extracthelp" description="Extract help key/value pair file from the JavaDoc tags.">
+		<path id="doclet.classpath">
+			<path refid="external.dependencies" />
+			<pathelement location="${java.classes}" />
+		</path>
+
+		<javadoc doclet="org.broadinstitute.sting.utils.help.ResourceBundleExtractorDoclet" docletpathref="doclet.classpath" classpathref="external.dependencies" classpath="${java.classes}" additionalparam="-build-timestamp &quot;${build.timestamp}&quot; -absolute-version ${build.version} -out ${basedir}/${resource.path} -quiet">
+			<sourcefiles>
+				<union>
+					<fileset refid="modified.source.files" />
+					<fileset refid="package.info.files" />
+				</union>
+			</sourcefiles>
+		</javadoc>
+	</target>
+
+	<target name="clean.gatkdocs">
+		<delete dir="gatkdocs" />
+	</target>
+
+	<target name="gatkdocs" depends="gatk.compile" description="Extract help key/value pair file from the JavaDoc tags.">
+		<path id="doclet.classpath">
+			<path refid="external.dependencies" />
+			<pathelement location="${java.classes}" />
+		</path>
+
+		<javadoc doclet="org.broadinstitute.sting.utils.help.GATKDoclet" docletpathref="doclet.classpath" classpathref="external.dependencies" classpath="${java.classes}" additionalparam="-private -build-timestamp &quot;${build.timestamp}&quot; -absolute-version ${build.version} -quiet -J-Xdebug -J-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005">
+			<sourcefiles>
+				<union>
+					<fileset refid="all.java.source.files" />
+				</union>
+			</sourcefiles>
+		</javadoc>
+	</target>
+
+	<target name="sting.compile" depends="gatk.compile" />
+
+	<target name="init.jar" depends="sting.compile,extracthelp">
+		<mkdir dir="${dist.dir}" />
+		<copy todir="${dist.dir}">
+			<fileset dir="${lib.dir}" includes="*.jar" />
+		</copy>
+	</target>
+
+	<target name="sting-utils.jar" depends="gatk.compile, init.jar">
+		<jar jarfile="${dist.dir}/StingUtils.jar">
+			<fileset dir="${java.classes}">
+				<include name="**/utils/**/*.class" />
+				<exclude name="**/utils/codecs/**/*.class" />
+				<exclude name="**/utils/variantcontext/**/*.class" />
+			</fileset>
+			<fileset dir="${java.classes}" includes="**/commandline/**/*.class" />
+			<fileset dir="${java.classes}" includes="**/sting/pipeline/**/*.class" />
+			<fileset dir="${java.classes}" includes="**/sting/jna/**/*.class" />
+			<fileset dir="${java.classes}" includes="net/sf/picard/**/*.class" />
+			<fileset dir="${java.classes}" includes="net/sf/samtools/**/*.class" />
+			<manifest>
+				<attribute name="Premain-Class" value="org.broadinstitute.sting.utils.instrumentation.Sizeof" />
+			</manifest>
+		</jar>
+	</target>
+
+	<target name="vcf.jar" depends="gatk.compile,init.jar">
+		<jar jarfile="${dist.dir}/vcf.jar">
+			<fileset dir="${java.classes}">
+				<include name="**/utils/codecs/**/*.class" />
+				<include name="**/utils/variantcontext/**/*.class" />
+				<include name="org/broadinstitute/sting/utils/exceptions/**" />
+				<include name="org/broadinstitute/sting/utils/help/DocumentedGATKFeature.class" />
+			</fileset>
+		</jar>
+	</target>
+
+	<target name="gatk.jar" depends="gatk.compile, init.jar" description="generate the GATK distribution">
+		<jar jarfile="${dist.dir}/GenomeAnalysisTK.jar">
+			<path refid="gatk.resources" />
+			<fileset dir="${java.contracts}" />
+			<fileset dir="${java.classes}">
+				<include name="${resource.file}" />
+				<include name="**/gatk/**/*.class" />
+				<include name="**/alignment/**/*.class" />
+			</fileset>
+			<manifest>
+				<attribute name="Main-Class" value="org.broadinstitute.sting.gatk.CommandLineGATK" />
+			</manifest>
+		</jar>
+
+		<jar jarfile="${dist.dir}/Aligner.jar">
+			<fileset dir="${java.classes}" includes="**/alignment/**/*.class" />
+		</jar>
+
+		<jar jarfile="${dist.dir}/AnalyzeCovariates.jar" whenmanifestonly="skip">
+			<fileset dir="${java.classes}">
+				<include name="**/analyzecovariates/**/*.class" />
+				<include name="**/gatk/walkers/recalibration/*.class" />
+			</fileset>
+			<manifest>
+				<attribute name="Main-Class" value="org.broadinstitute.sting.analyzecovariates.AnalyzeCovariates" />
+			</manifest>
+		</jar>
+
+		<subant target="dist" genericantfile="build.xml">
+			<property name="build.dir" value="${external.build.dir}" />
+			<property name="dist.dir" value="${external.dist.dir}" />
+			<property name="gatk.classpath" value="${external.gatk.classpath}" />
+			<fileset dir="${external.dir}" includes="*/build.xml" erroronmissingdir="false" />
+		</subant>
+	</target>
+	<!--
+    <target name="gatk.oneoffs.jar" depends="gatk.compile, init.jar"
+            description="generate the GATK oneoffs distribution" if="include.oneoffs">
+        <jar jarfile="${dist.dir}/CompareBAMAlignments.jar" whenmanifestonly="skip">
+          <fileset dir="${java.classes}">
+            <include name="**/tools/**/*.class" />
+          </fileset>
+          <manifest>
+            <attribute name="Main-Class" value="org.broadinstitute.sting.oneoffprojects.tools.CompareBAMAlignments" />
+          </manifest>
+        </jar>
+
+        <jar jarfile="${dist.dir}/SliceBams.jar" whenmanifestonly="skip">
+          <fileset dir="${java.classes}">
+            <include name="**/tools/**/*.class" />
+          </fileset>
+          <manifest>
+            <attribute name="Main-Class" value="org.broadinstitute.sting.playground.tools.SliceBams" />
+          </manifest>
+        </jar>
+    </target>
+-->
+	<target name="sting.jar" depends="sting-utils.jar, vcf.jar, gatk.jar" />
+
+	<target name="init.manifests" depends="sting.jar">
+		<pathconvert property="jar.classpath" pathsep=" ">
+			<flattenmapper />
+			<fileset dir="${dist.dir}" includes="*.jar" />
+			<filelist files="GATKScala.jar" />
+		</pathconvert>
+	</target>
+
+	<target name="sting-utils.manifests" depends="sting-utils.jar, init.manifests">
+		<jar jarfile="${dist.dir}/StingUtils.jar" update="true">
+			<manifest>
+				<attribute name="Class-Path" value="${jar.classpath}" />
+			</manifest>
+		</jar>
+	</target>
+
+	<target name="gatk.manifests" depends="gatk.jar, init.manifests">
+
+		<jar jarfile="${dist.dir}/GenomeAnalysisTK.jar" update="true">
+			<manifest>
+				<attribute name="Class-Path" value="${jar.classpath}" />
+			</manifest>
+		</jar>
+
+		<jar jarfile="${dist.dir}/AnalyzeCovariates.jar" update="true" whenmanifestonly="skip">
+			<manifest>
+				<attribute name="Class-Path" value="${jar.classpath}" />
+			</manifest>
+		</jar>
+
+	</target>
+	<!--
+    <target name="gatk.oneoffs.manifests" depends="gatk.oneoffs.jar, init.manifests" if="include.oneoffs">
+        <jar jarfile="${dist.dir}/CompareBAMAlignments.jar" update="true" whenmanifestonly="skip">
+            <manifest>
+                <attribute name="Class-Path" value="${jar.classpath}" />
+            </manifest>
+        </jar>
+        <jar jarfile="${dist.dir}/SliceBams.jar" update="true" whenmanifestonly="skip">
+            <manifest>
+                <attribute name="Class-Path" value="${jar.classpath}" />
+            </manifest>
+        </jar>
+    </target>
+-->
+
+	<target name="sting.manifests" depends="sting-utils.manifests, gatk.manifests" />
+
+	<target name="dist" depends="sting.manifests" />
+
+	<target name="core" description="force a build of the Sting core code">
+		<antcall target="dist" inheritAll="false">
+			<param name="sting.target" value="core" />
+		</antcall>
+	</target>
+
+	<target name="test.init.compile">
+		<mkdir dir="${java.test.classes}" />
+		<antcall target="resolve">
+			<param name="ivy.conf" value="test" />
+		</antcall>
+	</target>
+
+	<target name="test.java.compile" depends="init.buildall,dist,test.init.compile">
+		<echo message="Sting: Compiling test cases!" />
+		<javac fork="true" memoryMaximumSize="512m" destdir="${java.test.classes}" debug="true" optimize="on" tempdir="${java.io.tmpdir}">
+			<src path="${java.public.test.sources}" />
+			<classpath>
+				<path refid="external.dependencies" />
+				<pathelement location="${java.classes}" />
+				<pathelement location="${java.contracts}" />
+				<pathelement location="${lib.dir}/testng-5.14.1.jar" />
+			</classpath>
+			<compilerarg value="-proc:none" />
+			<!-- 
+            <compilerarg value="-Acom.google.java.contract.debug"/>
+            <compilerarg value="-Acom.google.java.contract.dump=dump/"/>
+ -->
+		</javac>
+	</target>
+	<!-- this target is included manually to wipe the cache clean -->
+	<target name="clean-all" depends="clean" description="Purge ivy cache">
+		<ivy:cleancache />
+	</target>
+	<!-- ******************************************************************************** -->
+	<!-- Javadoc                                                                          -->
+	<!-- ******************************************************************************** -->
+
+	<target name="clean.javadoc">
+		<delete dir="${javadoc.dir}" />
+	</target>
+
+	<target name="init.javadoc">
+		<mkdir dir="${javadoc.dir}" />
+	</target>
+
+	<target name="javadoc" depends="init.buildpublic,generate.javadoc" description="Generates public javadoc" />
+
+	<target name="generate.javadoc" depends="init.javadoc,resolve">
+		<javadoc destdir="${javadoc.dir}" classpathref="external.dependencies">
+			<fileset refid="java.source.files" />
+			<sourcepath path="${external.dir}" />
+		</javadoc>
+	</target>
+
+	<!-- Build a subset of picard with only those classes we need by completely abusing the packaging system -->
+	<!-- TODO: Reuse as much as possible of the 'stage' and 'package' targets -->
+	<target name="build-picard-private" depends="resolve">
+		<!-- Build out a classpath -->
+		<pathconvert property="required.picard.jars" pathsep=":">
+			<fileset dir="${basedir}">
+				<include name="staging" />
+				<include name="${lib.dir}/picard-*.*.*.jar" />
+				<include name="${lib.dir}/sam-*.jar" />
+			</fileset>
+		</pathconvert>
+		<echo message="required.picard.jars=${required.picard.jars}" />
+
+		<!-- Stage picard-private -->
+		<delete dir="staging" />
+		<mkdir dir="staging" />
+		<unjar src="${picard.dist.dir}/picard-private.jar" dest="staging" overwrite="true" />
+
+		<!-- Use the packaging system to extract parts of picard-private we need -->
+		<mkdir dir="${dist.dir}/packages" />
+		<xslt in="${package.xml.dir}/PicardPrivate.xml" out="${dist.dir}/packages/BuildPicardPrivate.xml" style="${package.xml.dir}/CreatePackager.xsl" />
+		<ant antfile="${dist.dir}/packages/BuildPicardPrivate.xml">
+			<property name="additional.jars" value="${required.picard.jars}" />
+		</ant>
+	</target>
+
+	<!-- ******************************************************************************** -->
+	<!-- Find bug tasks                                                                   -->
+	<!-- ******************************************************************************** -->
+	<path id="findbugs.classpath">
+		<fileset dir="${lib.dir}" erroronmissingdir="true" includes="*.jar" />
+	</path>
+	<target name="findbugs" depends="dist">
+		<antcall target="resolve">
+			<param name="ivy.conf" value="test" />
+		</antcall>
+		<!-- setup the taskdef, telling ant where to find the defined task for ant -->
+		<taskdef name="findbugs" classname="edu.umd.cs.findbugs.anttask.FindBugsTask" classpathref="findbugs.classpath" />
+		<!-- what should findbug look at: we want to aim it at the GATK.jar -->
+		<findbugs home="${findbugs.home}" output="xml" outputFile="${build.dir}/findbugs.xml" classpathref="findbugs.classpath" debug="false">
+			<auxClasspath>
+				<fileset dir="dist" includes="**/*.jar" excludes="**/GenomeAnalysisTK.jar" />
+			</auxClasspath>
+			<sourcePath path="../java/src" />
+			<class location="dist/GenomeAnalysisTK.jar" />
+		</findbugs>
+	</target>
+
+	<target name="clean" description="clean up" depends="clean.javadoc,clean.gatkdocs">
+		<delete dir="out" />
+		<delete dir="${build.dir}" />
+		<delete dir="${lib.dir}" />
+		<delete dir="dump" />
+		<delete dir="staging" />
+		<delete dir="${dist.dir}" />
+		<delete dir="pipelinetests" />
+	</target>
+
+	<!-- Build gsalib R module -->
+	<target name="gsalib">
+		<exec executable="R" failonerror="true">
+			<arg line="R CMD INSTALL -l public/R/ public/R/src/gsalib/" />
+		</exec>
+	</target>
+</project>
